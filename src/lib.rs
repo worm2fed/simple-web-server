@@ -8,7 +8,7 @@ pub struct ThreadPool {
     sender: mpsc::Sender<Job>,
 }
 
-struct Job;
+type Job = Box<dyn FnOnce() + Send + 'static>;
 
 impl ThreadPool {
     /// Create a new ThreadPool.
@@ -35,7 +35,8 @@ impl ThreadPool {
     where
         F: FnOnce() + Send + 'static,
     {
-        thread::spawn(f);
+        let job = Box::new(f);
+        self.sender.send(job).expect("Cannot send job");
     }
 }
 
@@ -46,8 +47,14 @@ struct Worker {
 
 impl Worker {
     fn new(id: usize, receiver: Arc<Mutex<mpsc::Receiver<Job>>>) -> Worker {
-        let thread = thread::spawn(|| {
-            receiver;
+        let thread = thread::spawn(move || loop {
+            let job = receiver
+                .lock()
+                .expect("Cannot acquire mutex")
+                .recv()
+                .expect("Cannot receive job");
+            println!("Worker {id} got a job; executing.");
+            job();
         });
         Worker { id, thread }
     }
